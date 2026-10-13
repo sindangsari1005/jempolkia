@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Jempol KIA Sindangsari</title>
+  <meta name="description" content="Layanan Jemput Bola Kartu Identitas Anak (KIA) Kelurahan Sindangsari.">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jempol KIA">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <style>
+    :root { --navy: #0f172a; --accent: #f97316; --accent-hover: #ea580c; --muted: #94a3b8; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--navy); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+    /* Aplikasi (iframe) memenuhi layar, aman terhadap notch / status bar */
+    #app {
+      position: fixed; inset: 0;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      background: #f8fafc;
+    }
+    #frame { width: 100%; height: 100%; border: 0; display: block; background: #f8fafc; }
+
+    /* Layar status: memuat / offline / belum dikonfigurasi */
+    .screen {
+      position: fixed; inset: 0; z-index: 10; display: none;
+      flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+      padding: 24px; text-align: center; color: #fff; background: var(--navy);
+    }
+    .screen.show { display: flex; }
+    .screen img { width: 84px; height: 84px; border-radius: 20px; }
+    .screen h1 { font-size: 1.25rem; font-weight: 700; }
+    .screen p { max-width: 380px; font-size: 0.92rem; line-height: 1.55; color: var(--muted); }
+    .screen code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 6px; color: #fdba74; font-size: 0.85rem; word-break: break-all; }
+    .btn {
+      appearance: none; border: 0; cursor: pointer; text-decoration: none;
+      background: var(--accent); color: #fff; font-weight: 600; font-size: 0.92rem;
+      padding: 12px 22px; border-radius: 10px; min-height: 44px; display: inline-flex; align-items: center;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #e2e8f0; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+    .spinner {
+      width: 38px; height: 38px; border-radius: 50%;
+      border: 4px solid rgba(255,255,255,.15); border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #slowHint { display: none; }
+    #slowHint.show { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- Aplikasi utama: web app Apps Script ditampilkan layar penuh -->
+  <div id="app">
+    <iframe id="frame" title="Jempol KIA Sindangsari" allow="clipboard-write; fullscreen" referrerpolicy="no-referrer-when-downgrade"></iframe>
+  </div>
+
+  <!-- Layar memuat -->
+  <div id="loading" class="screen show" role="status" aria-live="polite">
+    <img src="icon-192.png" alt="">
+    <div class="spinner"></div>
+    <h1>Jempol KIA</h1>
+    <p>Memuat layanan...</p>
+    <p id="slowHint">Pemuatan lebih lama dari biasanya. Jika layar tetap kosong, coba buka langsung atau muat ulang.</p>
+    <div class="row" id="slowActions" style="display:none">
+      <button class="btn" type="button" onclick="reloadApp()">Muat ulang</button>
+      <a class="btn ghost" id="openDirect" href="#" target="_blank" rel="noopener">Buka langsung</a>
+    </div>
+  </div>
+
+  <!-- Layar offline -->
+  <div id="offline" class="screen" role="alert">
+    <img src="icon-192.png" alt="">
+    <h1>Tidak ada koneksi internet</h1>
+    <p>Jempol KIA memerlukan internet untuk menampilkan dan menyimpan data. Periksa koneksi Anda lalu coba lagi.</p>
+    <button class="btn" type="button" onclick="reloadApp()">Coba lagi</button>
+  </div>
+
+  <!-- Layar belum dikonfigurasi -->
+  <div id="setup" class="screen" role="alert">
+    <img src="icon-192.png" alt="">
+    <h1>URL aplikasi belum diatur</h1>
+    <p>Buka berkas <code>index.html</code>, cari <code>APP_URL</code>, lalu ganti isinya dengan URL web app Apps Script Anda (berakhiran <code>/exec</code>).</p>
+  </div>
+
+  <script>
+    /* ====================================================================
+       PENGATURAN: ganti dengan URL web app Apps Script Anda
+       (Deploy > Manage deployments > Web app URL, berakhiran /exec)
+       ==================================================================== */
+    const APP_URL = 'GANTI_DENGAN_URL_WEB_APP_ANDA';
+
+    const frame = document.getElementById('frame');
+    const loading = document.getElementById('loading');
+    const offline = document.getElementById('offline');
+    const setup = document.getElementById('setup');
+    let slowTimer = null;
+
+    function isConfigured() { return /^https:\/\/script\.google\.com\/.+\/exec/.test(APP_URL); }
+
+    function show(el) { [loading, offline, setup].forEach(function (s) { s.classList.toggle('show', s === el); }); }
+    function hideAll() { [loading, offline, setup].forEach(function (s) { s.classList.remove('show'); }); }
+
+    function startLoad() {
+      if (!isConfigured()) { show(setup); return; }
+      if (!navigator.onLine) { show(offline); return; }
+
+      show(loading);
+      document.getElementById('slowHint').classList.remove('show');
+      document.getElementById('slowActions').style.display = 'none';
+      document.getElementById('openDirect').href = APP_URL;
+
+      clearTimeout(slowTimer);
+      slowTimer = setTimeout(function () {
+        document.getElementById('slowHint').classList.add('show');
+        document.getElementById('slowActions').style.display = 'flex';
+      }, 12000);
+
+      frame.src = APP_URL;
+    }
+
+    function reloadApp() {
+      frame.src = 'about:blank';
+      setTimeout(startLoad, 50);
+    }
+
+    frame.addEventListener('load', function () {
+      if (frame.src === 'about:blank' || !frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank') return;
+      clearTimeout(slowTimer);
+      hideAll();
+    });
+
+    window.addEventListener('offline', function () { show(offline); });
+    window.addEventListener('online', function () { if (offline.classList.contains('show')) startLoad(); });
+
+    /* Service worker: membuat aplikasi bisa dipasang & menampilkan cangkang saat offline */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').then(function (reg) {
+          reg.addEventListener('updatefound', function () {
+            const nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener('statechange', function () {
+              if (nw.state === 'installed' && navigator.serviceWorker.controller) nw.postMessage({ type: 'SKIP_WAITING' });
+            });
+          });
+        }).catch(function (err) { console.warn('Service worker gagal didaftarkan:', err); });
+      });
+    }
+
+    startLoad();
+  </script>
+</body>
+</html>
